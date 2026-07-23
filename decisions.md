@@ -3,3 +3,29 @@
 2026-07-20 — Bronze ingestion uses `mode("append")` rather than `overwrite`, so every ingestion run accumulates rather than replaces. This preserves full replay history (the whole point of Bronze), but means re-running ingestion for an already-loaded month duplicates rows, confirmed this directly when January was accidentally appended twice and had to be dropped and reloaded. Deduplication is deliberately not handled here, it's Silver's job in Week 2 via MERGE, not Bronze's.
 
 2026-07-20 — Every Bronze row gets four metadata columns (`_source_file`, `_ingested_at`, `_source_year`, `_source_month`) rather than just the raw trip data. This is ingestion lineage: without it, tracing which file a bad row came from or when it landed would mean guessing. Cost: four extra columns. Benefit: debuggable pipeline.
+
+2026-07-21 — Found and fixed a logic bug in the Silver quarantine rules: the original fare/total validation combined "is this negative" and "is this below the plausible minimum" into a single condition with one payment-type exemption (for No charge / Dispute trips). This let the exemption meant only for low-but-valid fares accidentally also protect negative fares sharing the same payment type — verified 418,882 negative-fare rows were silently passing through to `clean` before the fix. Resolved by splitting into two independent, ordered rules: an unconditional `negative_fare`/`negative_total` check with no exemption possible, followed by a separate `fare_below_minimum`/`total_below_minimum` check that only ever evaluates non-negative values. Confirmed fix with `clean.filter((fare_amount < 0) | (total_amount < 0)).count()` returning 0.
+
+Final quarantine business rules for Silver:
+- missing_timestamp — pickup or dropoff datetime is NULL
+- dropoff_before_pickup — dropoff earlier than pickup
+- zero_or_negative_distance — trip_distance <= 0
+- implausible_distance — trip_distance > 100mi (99.9th percentile was 29.79mi; next value jumped to 398,608mi — two isolated GPS/sensor errors, not a repeated glitch)
+- null_passenger_count / zero_passenger_count — passenger_count is NULL or 0
+- implausible_passenger_count — passenger_count > 6 (TLC allows 4 in a standard cab, 5 in a larger vehicle, 6 with a child under 7 — not a flat 4-passenger cap)
+- negative_fare / negative_total — always invalid, no exemption
+- fare_below_minimum / total_below_minimum — below the $3.00 base fare / $4.50 minimum total, exempting payment_type 3 (No charge) and 4 (Dispute)
+
+2026-07-21 — Added a tolls_amount ceiling (>$100) after finding a $1,702.88 max value during unprompted profiling — not part of the original rule set. Checked whether a separate negative_tolls rule was needed: found 49,272 negative-tolls rows, of which 49,272 also had negative total_amount and 49,258 also had negative fare_amount — meaning these are full negative-reversal records (refunds/voids), already fully caught by the existing negative_fare/negative_total rules. Added implausible_tolls only; skipped negative_tolls as redundant rather than adding dead code. Stopped profiling further columns here — diminishing returns past this point relative to time remaining before September.
+
+2026-07-21 — Deepened the partitioning decision (Q11/Q12): the deciding factor between pickup_date and PULocationID isn't just current cardinality (365 vs 265) or small-files risk — it's that date is a BOUNDED partitioning key and location is UNBOUNDED. Once a calendar day passes, that partition is permanently finished; no future ingestion ever adds to it. A location partition never closes — every day, forever, adds more rows to the same 265 directories.
+
+Consequence: the skew between busy zones (Manhattan) and quiet zones (outer boroughs) doesn't just exist once, it compounds daily, so the size gap between the largest and smallest partition keeps widening indefinitely rather than settling at a fixed ratio. This also means OPTIMIZE maintenance cost on a location-partitioned table grows without bound over time, and there is no clean way to archive old data (a location partition mixes a zone's entire history together, unlike a date partition which can simply be dropped or moved to cold storage as a whole unit once it ages out).
+
+Rule of thumb: partition on a dimension that closes (almost always time), never on a fixed-cardinality business dimension that data keeps flowing into forever.
+
+Resolved as: partition by pickup_date (bounded, even volume per partition), and apply ZORDER BY (PULocationID) within date partitions in Week 5 to get most of the location-filtering benefit via sharper file-level statistics, without ever making location the partition key itself.
+
+2026-07-21 — Verified Silver's MERGE-based idempotency directly rather than assuming it: ran the ingest-to-Silver cell twice against an already-populated trips_clean table. Row count stayed at 35,627,425 both times, confirming whenNotMatchedInsertAll() correctly found zero new matches on the second run — trip_id (SHA-256 of VendorID + both timestamps + both location IDs + distance + total_amount) is doing its job as a stable, deterministic key.
+
+2026-07-21 — trips_clean and trips_quarantine grow through different mechanisms. Clean uses MERGE (safe incremental append, only new trip_ids added, existing rows untouched). Quarantine uses full overwrite (entire table recomputed fresh every run), so it always reflects the current rule set against current data rather than accumulating stale judgments from rules that have since changed. Tradeoff accepted: every run re-tags the ENTIRE Bronze table, not just new rows — fine at this scale (41M rows), but would need to become a genuinely incremental (new-rows-only) design before this could run daily against a continuously growing production feed.

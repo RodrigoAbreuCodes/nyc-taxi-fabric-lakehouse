@@ -34,11 +34,22 @@ Total Bronze rows (all 12 months): 41,169,720
 - Negative-fare and zero-distance rates are broadly consistent between the sample and the full year, suggesting January was representative on those two checks specifically, just not on passenger_count.
 
 ## Week 2 — Silver quarantine breakdown
-(filled in once the quarantine logic from section 3.3 runs)
+
+Total Bronze rows processed: 41,169,720
+Clean: 35,627,454 (86.54%)
+Quarantined: 5,542,266 (13.46%)
 
 | Reject reason | Row count | % of total |
 |---|---|---|
-|  |  |  |
+| null_passenger_count | 3,817,047 | 9.2715% |
+| zero_or_negative_distance | 776,303 | 1.8856% |
+| negative_fare | 554,479 | 1.3465% |
+| zero_passenger_count | 383,912 | 0.9325% |
+| fare_below_minimum | 6,942 | 0.0169% |
+| implausible_distance | 1,613 | 0.0039% |
+| dropoff_before_pickup | 1,575 | 0.0038% |
+| negative_total | 168 | 0.0004% |
+| implausible_passenger_count | 152 | 0.0004% |
+| total_below_minimum | 75 | 0.0002% |
 
-Total clean rows:
-Total quarantined rows:
+**Note:** rules are evaluated in priority order, first match wins — a row failing multiple checks is only counted once, under whichever rule appears first. This is why `null_passenger_count` here (3,817,047) differs from the raw full-year NULL count profiled in Week 1 (4,091,232): roughly 274,000 of those rows also failed an earlier check (missing timestamp, bad distance) and were claimed by that rule instead.
