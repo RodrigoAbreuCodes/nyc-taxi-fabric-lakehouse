@@ -1,4 +1,4 @@
-NYC Taxi Medallion Lakehouse
+# NYC Taxi Medallion Lakehouse
 
 An end-to-end medallion lakehouse over real NYC Taxi & Limousine Commission (TLC) Yellow Taxi trip data — full calendar year 2024, ~41.2 million trips — built as a portfolio project and DP-700 preparation vehicle.
 
@@ -107,11 +107,3 @@ Full reasoning for both, plus every partitioning, modeling, and threshold decisi
 ## Running this
 
 Requires a Databricks workspace with Unity Catalog enabled. Run notebooks in order: 01_bronze_ingest -> 02_silver_transform -> 03_gold_build. See docs/decisions.md for why each step is structured the way it is.
-"""
-
-path = "/Workspace/Users/rmdd.abreu@gmail.com/nyc-taxi-fabric-lakehouse/README.md"
-
-with open(path, "w") as f:
-    f.write(readme_content)
-
-print("done")
