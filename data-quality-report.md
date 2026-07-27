@@ -53,3 +53,11 @@ Quarantined: 5,542,266 (13.46%)
 | total_below_minimum | 75 | 0.0002% |
 
 **Note:** rules are evaluated in priority order, first match wins — a row failing multiple checks is only counted once, under whichever rule appears first. This is why `null_passenger_count` here (3,817,047) differs from the raw full-year NULL count profiled in Week 1 (4,091,232): roughly 274,000 of those rows also failed an earlier check (missing timestamp, bad distance) and were claimed by that rule instead.
+
+## Correction — implausible_pickup_year (found during Week 3 dashboard investigation)
+
+55 rows with pickup_datetime outside calendar year 2024 (range: 2002–2026) were found to have passed all Week 2 quarantine rules undetected, requiring a full rebuild of trips_clean and fact_trips. New rule added: reject pickup year != 2024.
+
+Corrected final counts:
+- trips_clean: 35,627,370 (was 35,627,425)
+- Bronze total unchanged: 41,169,720
