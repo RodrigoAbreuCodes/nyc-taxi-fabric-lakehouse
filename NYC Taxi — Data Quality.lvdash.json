@@ -1,0 +1,141 @@
+{
+  "datasets": [
+    {
+      "name": "ab7b734c",
+      "displayName": "Untitled dataset",
+      "queryLines": [
+        "USE CATALOG `workspace`;\n",
+        "USE SCHEMA `default`;\n",
+        "\n",
+        "SELECT\n",
+        "  _reject_reason,\n",
+        "  COUNT(*)                                                  AS rejected_rows,\n",
+        "  ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 2)        AS pct_of_rejects\n",
+        "FROM nyc_taxi.silver.trips_quarantine\n",
+        "GROUP BY _reject_reason\n",
+        "ORDER BY rejected_rows DESC;\n"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "30a83703",
+      "displayName": "Overview",
+      "layout": [
+        {
+          "widget": {
+            "name": "6495b342",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ab7b734c",
+                  "fields": [
+                    {
+                      "name": "_reject_reason",
+                      "expression": "`_reject_reason`"
+                    },
+                    {
+                      "name": "sum(rejected_rows)",
+                      "expression": "SUM(`rejected_rows`)"
+                    }
+                  ],
+                  "disaggregated": false,
+                  "orders": [
+                    {
+                      "direction": "DESC",
+                      "expression": "SUM(`rejected_rows`)"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "frame": {
+                "title": "Rejected Rows by Reason",
+                "showTitle": true
+              },
+              "mark": {
+                "layout": "group"
+              },
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "_reject_reason",
+                  "axis": {
+                    "hideLabels": true,
+                    "title": "Reject Reason"
+                  },
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "measure-reversed",
+                      "measure": {
+                        "fieldName": "sum(rejected_rows)"
+                      }
+                    }
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(rejected_rows)",
+                  "axis": {
+                    "title": "Rejected Rows"
+                  },
+                  "displayName": "Rejected Rows",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "_reject_reason",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "null_passenger_count",
+                        "color": "#FFAB00"
+                      },
+                      {
+                        "value": "negative_fare",
+                        "color": "#8BCAE7"
+                      },
+                      {
+                        "value": "implausible_tolls",
+                        "color": "#AB4057"
+                      },
+                      {
+                        "value": "fare_below_minimum",
+                        "color": "#FCA4A1"
+                      }
+                    ]
+                  }
+                },
+                "label": {
+                  "show": true
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 9
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "widgetHeaderAlignment": "ALIGNMENT_UNSPECIFIED"
+    },
+    "applyModeEnabled": false
+  }
+}

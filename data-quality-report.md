@@ -61,3 +61,12 @@ Quarantined: 5,542,266 (13.46%)
 Corrected final counts:
 - trips_clean: 35,627,370 (was 35,627,425)
 - Bronze total unchanged: 41,169,720
+
+## Correction — duplicate_source_row (found via health-check after a standalone Bronze test run)
+
+The Bronze table's source data contains a small number of exact duplicate trip records (same trip appearing twice, identical across every column). Previously undetected — no rule compared rows against each other, only validated each row in isolation. New rule added: quarantine any row after the first occurrence of a given trip_id (via row_number() over a window partitioned by trip_id).
+
+Corrected final counts:
+- trips_clean: 35,627,368
+- trips_quarantine: 5,542,352
+- Bronze total unchanged: 41,169,720
