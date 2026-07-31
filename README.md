@@ -2,7 +2,7 @@
 
 An end-to-end medallion lakehouse over real NYC Taxi & Limousine Commission (TLC) Yellow Taxi trip data — full calendar year 2024, ~41.2 million trips — built as a portfolio project and DP-700 preparation vehicle.
 
-## Why this was built on Databricks, not Fabric
+## Why this was built on Databricks, not Fabric..
 
 This project was originally designed entirely around Microsoft Fabric. Over the course of setup, it hit five consecutive administrative walls on a training-provided tenant: GitHub sync disabled at the tenant level, Azure self-service signup blocked by organizational policy, Fabric trial capacity creation disabled, a personal-account workaround whose trial eligibility was then exhausted, and finally free-tier item creation that worked briefly and then stopped. None of these were engineering problems.
 
