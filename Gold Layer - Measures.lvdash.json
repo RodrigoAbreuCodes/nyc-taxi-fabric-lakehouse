@@ -1,0 +1,325 @@
+{
+  "datasets": [
+    {
+      "name": "3529cf37",
+      "displayName": "Weekly Revenue Distribution by Day of Week Analysis",
+      "queryLines": [
+        "USE CATALOG `workspace`;\n",
+        "USE SCHEMA `default`;\n",
+        "\n",
+        "SELECT\n",
+        "  d.day_name,\n",
+        "  d.day_of_week,\n",
+        "  ROUND(100.0 * SUM(f.total_amount) / SUM(SUM(f.total_amount)) OVER (), 2) AS pct_of_revenue\n",
+        "FROM nyc_taxi.gold.fact_trips f\n",
+        "JOIN nyc_taxi.gold.dim_date d ON f.date_key = d.date_key\n",
+        "GROUP BY d.day_name, d.day_of_week\n",
+        "ORDER BY d.day_of_week;"
+      ]
+    },
+    {
+      "name": "076aceaf",
+      "displayName": "Taxi Trip Counts Grouped by Borough Pickup Locations",
+      "queryLines": [
+        "USE CATALOG `workspace`;\n",
+        "USE SCHEMA `default`;\n",
+        "\n",
+        "SELECT p.pickup_borough, COUNT(*) AS trips\n",
+        "FROM nyc_taxi.gold.fact_trips f\n",
+        "JOIN nyc_taxi.gold.dim_pickup_zone p ON f.pickup_zone_key = p.pickup_zone_key\n",
+        "GROUP BY p.pickup_borough\n",
+        "ORDER BY trips DESC;"
+      ]
+    },
+    {
+      "name": "cc7306bf",
+      "displayName": "Monthly Insights on Complete Week Taxi Revenue",
+      "queryLines": [
+        "USE CATALOG `workspace`;\n",
+        "USE SCHEMA `default`;\n",
+        "\n",
+        "WITH weekly_revenue AS (\n",
+        "  SELECT\n",
+        "    date_trunc('week', date_key) AS week_start,\n",
+        "    COUNT(DISTINCT date_key)     AS days_in_week,\n",
+        "    SUM(total_amount)            AS revenue\n",
+        "  FROM nyc_taxi.gold.fact_trips\n",
+        "  GROUP BY date_trunc('week', date_key)\n",
+        ")\n",
+        "SELECT\n",
+        "  date_format(week_start, 'yyyy-MM') AS month,\n",
+        "  month(week_start)                  AS month_num,\n",
+        "  ROUND(AVG(revenue), 2)             AS avg_weekly_revenue,\n",
+        "  COUNT(*)                           AS full_weeks_in_month\n",
+        "FROM weekly_revenue\n",
+        "WHERE days_in_week = 7\n",
+        "GROUP BY date_format(week_start, 'yyyy-MM'), month(week_start)\n",
+        "ORDER BY month_num;"
+      ]
+    },
+    {
+      "name": "53080d29",
+      "displayName": "Monthly Average Weekly Taxi Revenue Insights",
+      "queryLines": [
+        "USE CATALOG `workspace`;\n",
+        "USE SCHEMA `default`;\n",
+        "\n",
+        "WITH weekly_revenue AS (\n",
+        "  SELECT\n",
+        "    date_trunc('week', date_key) AS week_start,\n",
+        "    COUNT(DISTINCT date_key)     AS days_in_week,\n",
+        "    SUM(total_amount)            AS revenue\n",
+        "  FROM nyc_taxi.gold.fact_trips\n",
+        "  GROUP BY date_trunc('week', date_key)\n",
+        ")\n",
+        "SELECT\n",
+        "  date_format(week_start, 'yyyy-MM') AS month,\n",
+        "  month(week_start)                  AS month_num,\n",
+        "  ROUND(AVG(revenue), 2)             AS avg_weekly_revenue,\n",
+        "  COUNT(*)                           AS full_weeks_in_month\n",
+        "FROM weekly_revenue\n",
+        "WHERE days_in_week = 7\n",
+        "GROUP BY date_format(week_start, 'yyyy-MM'), month(week_start)\n",
+        "ORDER BY month_num;"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "5b0ad197",
+      "displayName": "Gold Overview",
+      "layout": [
+        {
+          "widget": {
+            "name": "717de67b",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "3529cf37",
+                  "fields": [
+                    {
+                      "name": "day_name",
+                      "expression": "`day_name`"
+                    },
+                    {
+                      "name": "sum(pct_of_revenue)",
+                      "expression": "SUM(`pct_of_revenue`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "frame": {
+                "title": "Avg Revenue per Day of the Week",
+                "showTitle": true
+              },
+              "mark": {
+                "layout": "group"
+              },
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "day_name",
+                  "axis": {
+                    "title": "Day of the Week"
+                  },
+                  "displayName": "Day of the Week",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(pct_of_revenue)",
+                  "axis": {
+                    "title": "Average Revenue"
+                  },
+                  "displayName": "Average Revenue",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "day_name",
+                  "legend": {
+                    "hide": true
+                  },
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "label": {
+                  "show": true
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "74b8fcb3",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "076aceaf",
+                  "fields": [
+                    {
+                      "name": "sum(trips)",
+                      "expression": "SUM(`trips`)"
+                    },
+                    {
+                      "name": "pickup_borough",
+                      "expression": "`pickup_borough`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "frame": {
+                "title": "Pickup Location by Trips",
+                "showTitle": true
+              },
+              "mark": {
+                "colors": [
+                  "#8BCAE7"
+                ],
+                "layout": "group"
+              },
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "sum(trips)",
+                  "axis": {
+                    "title": "Trips"
+                  },
+                  "displayName": "trips",
+                  "scale": {
+                    "type": "quantitative",
+                    "fn": {
+                      "type": "symlog"
+                    }
+                  }
+                },
+                "y": {
+                  "fieldName": "pickup_borough",
+                  "axis": {
+                    "title": "Pickup Location"
+                  },
+                  "displayName": "Pickup Location",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "label": {
+                  "show": true
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 6,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "efc3ab58",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "cc7306bf",
+                  "fields": [
+                    {
+                      "name": "month_num",
+                      "expression": "`month_num`"
+                    },
+                    {
+                      "name": "sum(avg_weekly_revenue)",
+                      "expression": "SUM(`avg_weekly_revenue`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "frame": {
+                "title": "Avg Weekly Revenue per Month",
+                "showTitle": true
+              },
+              "mark": {
+                "layout": "layer"
+              },
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "month_num",
+                  "axis": {
+                    "title": "Month"
+                  },
+                  "displayName": "Month",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(avg_weekly_revenue)",
+                  "axis": {
+                    "title": "Average Weekly Revenue"
+                  },
+                  "displayName": "Average Weekly Revenue",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "label": {
+                  "show": true
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 6,
+            "width": 9,
+            "height": 6
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "widgetHeaderAlignment": "ALIGNMENT_UNSPECIFIED"
+    },
+    "applyModeEnabled": false
+  }
+}

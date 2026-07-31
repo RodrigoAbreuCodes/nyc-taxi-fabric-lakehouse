@@ -1,0 +1,69 @@
+2026-07-20 — Landed the taxi zone lookup Volume in `silver` rather than `bronze`. Reasoning: bronze exists to preserve replayability for data that arrives repeatedly and might need reprocessing (like a new month of trip data); the zone lookup is static reference data with no meaningful raw/cleaned distinction and nothing to replay. Considered keeping all raw external files in bronze for strict consistency but judged the exception clearer here.
+
+2026-07-20 — Bronze ingestion uses `mode("append")` rather than `overwrite`, so every ingestion run accumulates rather than replaces. This preserves full replay history (the whole point of Bronze), but means re-running ingestion for an already-loaded month duplicates rows, confirmed this directly when January was accidentally appended twice and had to be dropped and reloaded. Deduplication is deliberately not handled here, it's Silver's job in Week 2 via MERGE, not Bronze's.
+
+2026-07-20 — Every Bronze row gets four metadata columns (`_source_file`, `_ingested_at`, `_source_year`, `_source_month`) rather than just the raw trip data. This is ingestion lineage: without it, tracing which file a bad row came from or when it landed would mean guessing. Cost: four extra columns. Benefit: debuggable pipeline.
+
+2026-07-21 — Found and fixed a logic bug in the Silver quarantine rules: the original fare/total validation combined "is this negative" and "is this below the plausible minimum" into a single condition with one payment-type exemption (for No charge / Dispute trips). This let the exemption meant only for low-but-valid fares accidentally also protect negative fares sharing the same payment type — verified 418,882 negative-fare rows were silently passing through to `clean` before the fix. Resolved by splitting into two independent, ordered rules: an unconditional `negative_fare`/`negative_total` check with no exemption possible, followed by a separate `fare_below_minimum`/`total_below_minimum` check that only ever evaluates non-negative values. Confirmed fix with `clean.filter((fare_amount < 0) | (total_amount < 0)).count()` returning 0.
+
+Final quarantine business rules for Silver:
+- missing_timestamp — pickup or dropoff datetime is NULL
+- dropoff_before_pickup — dropoff earlier than pickup
+- zero_or_negative_distance — trip_distance <= 0
+- implausible_distance — trip_distance > 100mi (99.9th percentile was 29.79mi; next value jumped to 398,608mi — two isolated GPS/sensor errors, not a repeated glitch)
+- null_passenger_count / zero_passenger_count — passenger_count is NULL or 0
+- implausible_passenger_count — passenger_count > 6 (TLC allows 4 in a standard cab, 5 in a larger vehicle, 6 with a child under 7 — not a flat 4-passenger cap)
+- negative_fare / negative_total — always invalid, no exemption
+- fare_below_minimum / total_below_minimum — below the $3.00 base fare / $4.50 minimum total, exempting payment_type 3 (No charge) and 4 (Dispute)
+
+2026-07-21 — Added a tolls_amount ceiling (>$100) after finding a $1,702.88 max value during unprompted profiling — not part of the original rule set. Checked whether a separate negative_tolls rule was needed: found 49,272 negative-tolls rows, of which 49,272 also had negative total_amount and 49,258 also had negative fare_amount — meaning these are full negative-reversal records (refunds/voids), already fully caught by the existing negative_fare/negative_total rules. Added implausible_tolls only; skipped negative_tolls as redundant rather than adding dead code. Stopped profiling further columns here — diminishing returns past this point relative to time remaining before September.
+
+2026-07-21 — Deepened the partitioning decision (Q11/Q12): the deciding factor between pickup_date and PULocationID isn't just current cardinality (365 vs 265) or small-files risk — it's that date is a BOUNDED partitioning key and location is UNBOUNDED. Once a calendar day passes, that partition is permanently finished; no future ingestion ever adds to it. A location partition never closes — every day, forever, adds more rows to the same 265 directories.
+
+Consequence: the skew between busy zones (Manhattan) and quiet zones (outer boroughs) doesn't just exist once, it compounds daily, so the size gap between the largest and smallest partition keeps widening indefinitely rather than settling at a fixed ratio. This also means OPTIMIZE maintenance cost on a location-partitioned table grows without bound over time, and there is no clean way to archive old data (a location partition mixes a zone's entire history together, unlike a date partition which can simply be dropped or moved to cold storage as a whole unit once it ages out).
+
+Rule of thumb: partition on a dimension that closes (almost always time), never on a fixed-cardinality business dimension that data keeps flowing into forever.
+
+Resolved as: partition by pickup_date (bounded, even volume per partition), and apply ZORDER BY (PULocationID) within date partitions in Week 5 to get most of the location-filtering benefit via sharper file-level statistics, without ever making location the partition key itself.
+
+2026-07-21 — Verified Silver's MERGE-based idempotency directly rather than assuming it: ran the ingest-to-Silver cell twice against an already-populated trips_clean table. Row count stayed at 35,627,425 both times, confirming whenNotMatchedInsertAll() correctly found zero new matches on the second run — trip_id (SHA-256 of VendorID + both timestamps + both location IDs + distance + total_amount) is doing its job as a stable, deterministic key.
+
+2026-07-21 — trips_clean and trips_quarantine grow through different mechanisms. Clean uses MERGE (safe incremental append, only new trip_ids added, existing rows untouched). Quarantine uses full overwrite (entire table recomputed fresh every run), so it always reflects the current rule set against current data rather than accumulating stale judgments from rules that have since changed. Tradeoff accepted: every run re-tags the ENTIRE Bronze table, not just new rows — fine at this scale (41M rows), but would need to become a genuinely incremental (new-rows-only) design before this could run daily against a continuously growing production feed.
+
+2026-07-27 - One row in fact_trips represents one completed taxi trip.
+
+2026-07-27 — Q16 (role-playing dimensions): dim_taxi_zone is a role-playing dimension, joined to fact_trips twice (pickup and dropoff). Initially built as one shared table with two foreign keys — cheapest to build, but this breaks specifically in Power BI/Direct Lake, since BI tools generally allow only one *active* relationship between any two tables at a time; the second would sit inactive unless a report author manually invokes USERELATIONSHIP() in DAX. The plain-SQL Gold layer built so far doesn't hit this limitation (explicit aliases have no such restriction), but since the plan already includes building a real Fabric/Power BI semantic model later, and this exact limitation has been hit before in prior Power BI work, switched to two role-named views (dim_pickup_zone, dim_dropoff_zone) over the same underlying zone data — avoids the relationship-limit problem entirely, ahead of when it would otherwise resurface.
+Q17 (SCD Type 2): deliberately not implemented on dim_taxi_zone. SCD2 (preserving history via new rows plus valid_from/valid_to dates) earns its cost only when a dimension attribute has genuine point-in-time business value — e.g. a customer's address at the time of a specific shipment. Taxi zone names have no such case: nobody's business question depends on what a zone was called historically, only where a trip happened under the current name. TLC zone boundaries are also effectively static (stable since 2016). SCD Type 1 (overwrite/reload in place) is the correct default here, not a shortcut — building SCD2 machinery would mean defending against a change that doesn't meaningfully happen, for a case where nobody needs historical accuracy even if it did.
+
+2026-07-27 — Verified the "Unknown" pickup_borough category shown in the trips-by-borough dashboard widget is entirely genuine TLC data (LocationID 264, an official non-geographic placeholder in their zone lookup), not a masked referential-integrity failure from the pipeline's own -1 fallback row. Checked directly: COUNT of trips with pickup_zone_key = -1 is 0. Confirms the 8-category borough breakdown (5 real boroughs + EWR + Unknown + N/A) is fully trustworthy as displayed, with no pipeline-generated unmatched keys hiding inside it.
+
+2026-07-27 — Found and fixed a real gap in the Silver quarantine rules: every existing rule validated a value's plausibility in isolation (distance, fare, passenger count), but nothing checked temporal plausibility against the ingestion itself. 55 rows with pickup dates outside 2024 (ranging from 2002 to 2026) passed every check and flowed all the way into fact_trips undetected — discovered only by chance, while investigating a monthly revenue pattern that grouped directly on fact_trips' own date_key rather than joining through dim_date.
+
+This surfaced two things: (1) a new rule, implausible_pickup_year (pickup year != 2024), added to close the gap; (2) a structural consequence of trips_clean's MERGE-based design (documented 2026-07-21) — MERGE only inserts new rows, so already-quarantined-should-have-been rows already sitting in the table could not be fixed by adding a rule and re-running. Required a full drop and rebuild of trips_clean and fact_trips from Bronze with the corrected logic, rather than an incremental fix.
+
+Also confirms Q14/Q15 in practice: dim_date was deliberately generated independently rather than derived from fact data (Q14). Had any report joined through dim_date instead of grouping on fact_trips directly, these 55 rows — having no matching calendar date — would have silently vanished from results with an inner join, or shown as unexplained blanks with a left join (Q15), rather than surfacing the bug at all.
+
+2026-07-28 — Testing 01_bronze_ingest standalone re-triggered ingest_month(2024, 1) via the widget default values, duplicating January 2024 in Bronze (Bronze has no dedup by design — that's Silver's job). Caught via _ingested_at grouping (two distinct batches for the same month), fixed with a targeted DELETE on the newer batch rather than dropping the whole table. Confirms the exact risk the notebook's own warning cell was written to flag.
+
+2026-07-28 — CI/CD (Databricks Asset Bundles + GitHub Actions live deployment) intentionally deferred rather than skipped. Free Edition's CLI/PAT authentication has documented, real friction beyond what any other browser-only step in this build has needed. Given tonight already turned two "should be quick" steps into multi-hour debugging (the silver duplication incident, the metadata mismatch), adding CLI auth troubleshooting on top wasn't a good tradeoff. The databricks.yml bundle definition is committed as design documentation. Live deployment is planned for the Fabric bridge phase instead, where deployment pipelines are UI-driven with no CLI/token setup required — already scoped as a low-effort translation item.
+
+2026-07-31 — March 2024 Bronze→Gold drop rate flagged, root cause not yet confirmed
+
+**Finding:** `validate_month_load()` flagged March at a 24.3% Bronze→Gold drop rate,
+6.3 points above the Jan/Feb historical average (~18%, corrected for a leap-year date
+bug in the manual check that had understated February's true rate).
+
+**Status: open, not resolved.** Checked Bronze's raw March rows via an unordered
+sample — nothing conclusively wrong, but the sample wasn't a real test: Silver's
+actual filter conditions were never confirmed, so there was no specific thing to
+check for. Not chased further before stopping for the night.
+
+**Next step, when picked back up:** open `Silver - Transform`, identify what it
+actually filters/drops on, then check March's Bronze data against that specific
+condition — or check a Silver rejects/quarantine table's March count directly, if
+one exists. Either gives a real answer; the sample-eyeball approach doesn't.
+
+**Why logged instead of ignored:** volume increase Jan→March (95.6K → 115.6K
+trips/day) is plausible on its own and not the concern. The drop *rate* moving is
+the open question — could be Silver correctly catching genuinely dirtier March
+data, or could be a real issue. Not yet known which.
