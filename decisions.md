@@ -46,3 +46,24 @@ Also confirms Q14/Q15 in practice: dim_date was deliberately generated independe
 2026-07-28 — Testing 01_bronze_ingest standalone re-triggered ingest_month(2024, 1) via the widget default values, duplicating January 2024 in Bronze (Bronze has no dedup by design — that's Silver's job). Caught via _ingested_at grouping (two distinct batches for the same month), fixed with a targeted DELETE on the newer batch rather than dropping the whole table. Confirms the exact risk the notebook's own warning cell was written to flag.
 
 2026-07-28 — CI/CD (Databricks Asset Bundles + GitHub Actions live deployment) intentionally deferred rather than skipped. Free Edition's CLI/PAT authentication has documented, real friction beyond what any other browser-only step in this build has needed. Given tonight already turned two "should be quick" steps into multi-hour debugging (the silver duplication incident, the metadata mismatch), adding CLI auth troubleshooting on top wasn't a good tradeoff. The databricks.yml bundle definition is committed as design documentation. Live deployment is planned for the Fabric bridge phase instead, where deployment pipelines are UI-driven with no CLI/token setup required — already scoped as a low-effort translation item.
+
+2026-07-31 — March 2024 Bronze→Gold drop rate flagged, root cause not yet confirmed
+
+**Finding:** `validate_month_load()` flagged March at a 24.3% Bronze→Gold drop rate,
+6.3 points above the Jan/Feb historical average (~18%, corrected for a leap-year date
+bug in the manual check that had understated February's true rate).
+
+**Status: open, not resolved.** Checked Bronze's raw March rows via an unordered
+sample — nothing conclusively wrong, but the sample wasn't a real test: Silver's
+actual filter conditions were never confirmed, so there was no specific thing to
+check for. Not chased further before stopping for the night.
+
+**Next step, when picked back up:** open `Silver - Transform`, identify what it
+actually filters/drops on, then check March's Bronze data against that specific
+condition — or check a Silver rejects/quarantine table's March count directly, if
+one exists. Either gives a real answer; the sample-eyeball approach doesn't.
+
+**Why logged instead of ignored:** volume increase Jan→March (95.6K → 115.6K
+trips/day) is plausible on its own and not the concern. The drop *rate* moving is
+the open question — could be Silver correctly catching genuinely dirtier March
+data, or could be a real issue. Not yet known which.
